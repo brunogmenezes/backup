@@ -1,6 +1,6 @@
 <?php
 /**
- * Instalação e Configuração Inicial do Banco de Dados
+ * Instalação e Configuração Inicial do Banco de Dados com Suporte a Migração
  */
 
 require_once __DIR__ . '/config.php';
@@ -11,7 +11,6 @@ $success = '';
 
 // Verifica se o setup já foi executado
 if (file_exists($lock_file)) {
-    // Se o banco já existe, redireciona para o login
     header('Location: login.php');
     exit;
 }
@@ -28,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Por favor, preencha todos os campos do administrador.';
         } else {
             try {
-                // 1. Tenta conectar ao servidor MySQL (sem selecionar banco de dados ainda)
+                // 1. Conecta ao host MySQL sem especificar banco de dados inicialmente
                 $dsn = "mysql:host=" . DB_HOST . ";port=" . DB_PORT . ";charset=utf8mb4";
                 $options = [
                     PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
@@ -36,43 +35,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ];
                 $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
                 
-                // 2. Executa o schema.sql
+                // 2. Executa schema.sql para criar tabelas e o banco de dados se não existirem
                 $schema_file = __DIR__ . '/schema.sql';
                 if (!file_exists($schema_file)) {
                     throw new Exception('O arquivo schema.sql não foi encontrado no servidor.');
                 }
                 
                 $sql = file_get_contents($schema_file);
-                
-                // Executa as queries
                 $pdo->exec($sql);
                 
-                // 3. Conecta agora no banco de dados criado
+                // 3. Conecta agora selecionando o banco de dados 'pureftpd'
                 $pdo->exec("USE `" . DB_NAME . "`");
                 
-                // 4. Verifica se o administrador já existe
+                // 4. MIGRAR TABELA 'ftpd' DE PRODUÇÃO (se necessário)
+                // Verifica e adiciona a coluna device_id
+                $stmt = $pdo->query("SHOW COLUMNS FROM `ftpd` LIKE 'device_id'");
+                if (!$stmt->fetch()) {
+                    $pdo->exec("ALTER TABLE `ftpd` ADD COLUMN `device_id` INT DEFAULT NULL");
+                    
+                    // Adiciona a Foreign Key. Usamos try/catch caso a restrição já exista de alguma forma
+                    try {
+                        $pdo->exec("ALTER TABLE `ftpd` ADD CONSTRAINT `fk_ftpd_device` FOREIGN KEY (`device_id`) REFERENCES `devices` (`id`) ON DELETE SET NULL");
+                    } catch (PDOException $ex) {
+                        // Ignora erro se a constraint já existir
+                    }
+                }
+                
+                // Verifica e adiciona colunas de auditoria adicionais se não existirem
+                $stmt = $pdo->query("SHOW COLUMNS FROM `ftpd` LIKE 'created_at'");
+                if (!$stmt->fetch()) {
+                    $pdo->exec("ALTER TABLE `ftpd` ADD COLUMN `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+                }
+                
+                $stmt = $pdo->query("SHOW COLUMNS FROM `ftpd` LIKE 'updated_at'");
+                if (!$stmt->fetch()) {
+                    $pdo->exec("ALTER TABLE `ftpd` ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+                }
+                
+                // 5. Verifica se o administrador já existe
                 $stmt = $pdo->prepare("SELECT COUNT(*) FROM `admins` WHERE `username` = ?");
                 $stmt->execute([$admin_user]);
                 if ($stmt->fetchColumn() == 0) {
-                    // Criptografa a senha usando password_hash padrão do PHP (seguro para o painel web)
                     $hashed_pass = password_hash($admin_pass, PASSWORD_DEFAULT);
-                    
                     $stmt = $pdo->prepare("INSERT INTO `admins` (`username`, `password`, `name`) VALUES (?, ?, ?)");
                     $stmt->execute([$admin_user, $hashed_pass, $admin_name]);
                 }
                 
-                // 5. Cria a pasta de storage de simulação de backups se ela não existir
+                // 6. Cria a pasta local física se ela não existir (apenas se mapeamento ativo, ou cria no Linux)
                 $storage_path = FTP_BASE_DIR_LOCAL_PREFIX;
                 if (!file_exists($storage_path)) {
                     mkdir($storage_path, 0777, true);
                 }
                 
-                // 6. Grava o arquivo lock para evitar re-execução
-                file_put_contents($lock_file, date('Y-m-d H:i:s') . " - Setup completo.");
+                // 7. Grava o arquivo de lock
+                file_put_contents($lock_file, date('Y-m-d H:i:s') . " - Instalação/Migração completa.");
                 
-                $success = 'Sistema configurado com sucesso! Redirecionando para o login...';
-                
-                // Redireciona em 3 segundos
+                $success = 'Sistema configurado e migrado com sucesso! Redirecionando para o login...';
                 header('refresh:3;url=login.php');
                 
             } catch (PDOException $e) {
@@ -174,8 +192,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="setup-logo">
             <svg viewBox="0 0 24 24"><path d="M12,15.5A2.5,2.5 0 0,1 9.5,13A2.5,2.5 0 0,1 12,10.5A2.5,2.5 0 0,1 14.5,13A2.5,2.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.47,5.34 14.86,5.08L14.47,2.42C14.43,2.18 14.22,2 13.97,2H9.97C9.72,2 9.51,2.18 9.47,2.42L9.08,5.08C8.47,5.34 7.9,5.66 7.38,6.05L4.89,5.05C4.67,4.96 4.4,5.05 4.27,5.27L2.27,8.73C2.15,8.95 2.2,9.22 2.39,9.37L4.5,11C4.46,11.34 4.43,11.67 4.43,12C4.43,12.33 4.46,12.65 4.5,13L2.39,14.63C2.2,14.78 2.15,15.05 2.27,15.27L4.27,18.73C4.4,18.95 4.67,19.04 4.89,18.95L7.38,17.95C7.9,18.34 8.47,18.66 9.08,18.92L9.47,21.58C9.51,21.82 9.72,22 9.97,22H13.97C14.22,22 14.43,21.82 14.47,21.58L14.86,18.92C15.47,18.66 16.04,18.34 16.56,17.95L19.05,18.95C19.27,19.04 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/></svg>
         </div>
-        <h1>Configuração do Sistema</h1>
-        <p>Inicialize o banco de dados MySQL/MariaDB e crie o usuário do painel.</p>
+        <h1>Configuração e Migração</h1>
+        <p>Inicialize o painel e vincule os usuários FTP existentes sem perda de dados.</p>
     </div>
 
     <?php if ($error): ?>
@@ -188,7 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <?php if (!$success): ?>
         <div class="db-info-pill">
-            <h3>Parâmetros de Banco de Dados Detectados</h3>
+            <h3>Banco de Dados de Produção Detectado</h3>
             <table>
                 <tr>
                     <td class="label">Host do MySQL:</td>
@@ -196,11 +214,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </tr>
                 <tr>
                     <td class="label">Banco de Dados:</td>
-                    <td class="value"><?php echo DB_NAME; ?></td>
+                    <td class="value"><?php echo DB_NAME; ?> (pureftpd)</td>
                 </tr>
                 <tr>
-                    <td class="label">Usuário:</td>
-                    <td class="value"><?php echo DB_USER; ?></td>
+                    <td class="label">Tabela de Usuários:</td>
+                    <td class="value">ftpd</td>
                 </tr>
             </table>
             <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; line-height: 1.3;">
@@ -211,11 +229,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <form action="" method="POST">
             <input type="hidden" name="action" value="setup">
             
-            <h3 style="font-size: 1rem; color: white; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">Conta Administradora</h3>
+            <h3 style="font-size: 1rem; color: white; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">Criar Administrador do Painel</h3>
             
             <div class="form-group">
-                <label for="admin_name">Nome do Administrador</label>
-                <input type="text" id="admin_name" name="admin_name" class="form-control" placeholder="Ex: Admin" required>
+                <label for="admin_name">Nome Completo</label>
+                <input type="text" id="admin_name" name="admin_name" class="form-control" placeholder="Ex: Administrador" required>
             </div>
             
             <div class="form-group">
@@ -224,12 +242,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             
             <div class="form-group">
-                <label for="admin_pass">Senha do Administrador</label>
+                <label for="admin_pass">Senha</label>
                 <input type="password" id="admin_pass" name="admin_pass" class="form-control" placeholder="Digite uma senha forte" required>
             </div>
             
             <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem; padding: 0.85rem;">
-                Instalar e Configurar
+                Instalar / Atualizar Banco
             </button>
         </form>
     <?php endif; ?>

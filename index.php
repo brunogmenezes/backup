@@ -1,6 +1,6 @@
 <?php
 /**
- * Dashboard Principal
+ * Dashboard Principal (Adaptado para Tabela ftpd)
  */
 
 $page_title = 'Dashboard';
@@ -37,11 +37,11 @@ try {
     // Total de dispositivos
     $total_devices = $pdo->query("SELECT COUNT(*) FROM `devices`")->fetchColumn();
     
-    // Total de contas FTP
-    $total_ftp_users = $pdo->query("SELECT COUNT(*) FROM `ftp_users`")->fetchColumn();
+    // Total de contas FTP (Tabela ftpd de produção)
+    $total_ftp_users = $pdo->query("SELECT COUNT(*) FROM `ftpd`")->fetchColumn();
     
-    // Total de contas FTP ativas
-    $active_ftp_users = $pdo->query("SELECT COUNT(*) FROM `ftp_users` WHERE `Status` = 1")->fetchColumn();
+    // Total de contas FTP ativas (status = 1)
+    $active_ftp_users = $pdo->query("SELECT COUNT(*) FROM `ftpd` WHERE `status` = 1")->fetchColumn();
 } catch (PDOException $e) {
     $total_devices = 0;
     $total_ftp_users = 0;
@@ -63,17 +63,16 @@ for ($i = 6; $i >= 0; $i--) {
 }
 
 try {
-    $stmt = $pdo->query("SELECT f.User, f.Dir, f.device_id, d.name AS device_name FROM ftp_users f LEFT JOIN devices d ON f.device_id = d.id");
+    // Lendo de ftpd
+    $stmt = $pdo->query("SELECT f.User, f.Dir, f.device_id, d.name AS device_name FROM ftpd f LEFT JOIN devices d ON f.device_id = d.id");
     $ftp_users = $stmt->fetchAll();
     
     foreach ($ftp_users as $user) {
         $local_dir = get_real_ftp_path($user['Dir']);
         
         if (file_exists($local_dir) && is_dir($local_dir)) {
-            // Soma o tamanho total de backups deste diretório
             $total_backup_size += get_dir_size_local($local_dir);
             
-            // Lê arquivos para listar recentes e preencher histórico
             $files = scandir($local_dir);
             foreach ($files as $file) {
                 if ($file === '.' || $file === '..') continue;
@@ -83,7 +82,6 @@ try {
                     $mtime = filemtime($file_path);
                     $file_date_key = date('Y-m-d', $mtime);
                     
-                    // Se o arquivo foi modificado nos últimos 7 dias, conta no gráfico
                     if (isset($activity_data[$file_date_key])) {
                         $activity_data[$file_date_key]['count']++;
                     }
@@ -100,7 +98,7 @@ try {
         }
     }
 } catch (Exception $e) {
-    // Silencia erros se as tabelas ainda não existirem plenamente
+    // Silencia se tabelas não existirem plenamente
 }
 
 // Ordena todos os arquivos por data de modificação decrescente
@@ -115,7 +113,7 @@ $recent_backups = array_slice($all_files, 0, 5);
 $chart_counts = array_column($activity_data, 'count');
 $chart_labels = array_column($activity_data, 'day_label');
 $max_count = count($chart_counts) > 0 ? max($chart_counts) : 0;
-if ($max_count == 0) $max_count = 5; // Evita divisão por zero e cria uma escala mínima de 5
+if ($max_count == 0) $max_count = 5;
 
 // Mapeia os pontos para coordenadas SVG (Largura: 700, Altura: 150)
 $points = [];
@@ -123,14 +121,11 @@ $x_interval = 700 / 6;
 $index = 0;
 foreach ($chart_counts as $count) {
     $x = $index * $x_interval;
-    // O eixo Y no SVG começa do topo (0) e vai para baixo, por isso subtraímos da altura total (130px úteis)
     $y = 130 - ($count / $max_count * 100);
     $points[] = "$x,$y";
     $index++;
 }
 $points_str = implode(' ', $points);
-
-// Coordenadas para preenchimento da área sob o gráfico
 $area_points_str = "0,130 " . $points_str . " 700,130";
 ?>
 
@@ -177,7 +172,6 @@ $area_points_str = "0,130 " . $points_str . " 700,130";
         
         <div class="chart-container">
             <svg viewBox="0 0 700 150" class="chart-svg" preserveAspectRatio="none">
-                <!-- Gradients Definitions -->
                 <defs>
                     <linearGradient id="chart-gradient" x1="0" y1="0" x2="1" y2="0">
                         <stop offset="0%" stop-color="#6366f1" />
@@ -189,35 +183,23 @@ $area_points_str = "0,130 " . $points_str . " 700,130";
                     </linearGradient>
                 </defs>
                 
-                <!-- Grid Lines -->
                 <line x1="0" y1="30" x2="700" y2="30" class="chart-grid-line" />
                 <line x1="0" y1="80" x2="700" y2="80" class="chart-grid-line" />
                 <line x1="0" y1="130" x2="700" y2="130" class="chart-grid-line" style="stroke: rgba(255, 255, 255, 0.1);" />
                 
-                <!-- Chart Area Fill -->
                 <polygon points="<?php echo $area_points_str; ?>" class="chart-area" />
-                
-                <!-- Chart Line -->
                 <polyline points="<?php echo $points_str; ?>" class="chart-line" />
                 
-                <!-- Interaction Dots and Labels -->
                 <?php
                 $index = 0;
                 foreach ($chart_counts as $count) {
                     $x = $index * $x_interval;
                     $y = 130 - ($count / $max_count * 100);
-                    
-                    // Desenha o círculo
                     echo "<circle cx='$x' cy='$y' class='chart-dot' data-count='$count' title='Uploads: $count'></circle>";
-                    
-                    // Desenha a quantidade sobre a bolinha se for maior que zero
                     if ($count > 0) {
                         echo "<text x='$x' y='" . ($y - 12) . "' fill='white' font-size='10' font-weight='bold' text-anchor='middle'>$count</text>";
                     }
-                    
-                    // Eixo X Labels
                     echo "<text x='$x' y='148' fill='#9ca3af' font-size='10' font-family='Inter' text-anchor='middle'>{$chart_labels[$index]}</text>";
-                    
                     $index++;
                 }
                 ?>
@@ -225,7 +207,7 @@ $area_points_str = "0,130 " . $points_str . " 700,130";
         </div>
     </div>
 
-    <!-- Recent Actions / Overview -->
+    <!-- Actions Section -->
     <div class="section-container" style="margin-bottom: 0; display: flex; flex-direction: column;">
         <div class="section-header">
             <h2 class="section-title">Ações Rápidas</h2>
@@ -304,7 +286,6 @@ $area_points_str = "0,130 " . $points_str . " 700,130";
 </div>
 
 <style>
-    /* Estilos específicos adaptados para responsividade do gráfico e seções */
     @media (max-width: 900px) {
         .dashboard-sections {
             grid-template-columns: 1fr !important;

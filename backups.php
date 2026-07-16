@@ -1,23 +1,23 @@
 <?php
 /**
- * Explorador e Gerenciador de Arquivos de Backup
+ * Explorador e Gerenciador de Arquivos de Backup (Tabela ftpd)
  */
 
 require_once __DIR__ . '/db.php'; // Inicia a sessão e conecta ao banco de dados
 
 // Segurança de Download de Arquivo
 if (isset($_GET['download']) && isset($_GET['user'])) {
-    // Evita acesso se não estiver autenticado
     if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
         header('HTTP/1.0 403 Forbidden');
         exit('Acesso negado.');
     }
     
     $download_user = trim($_GET['user']);
-    $download_file = basename($_GET['download']); // basename evita directory traversal
+    $download_file = basename($_GET['download']);
     
     try {
-        $stmt = $pdo->prepare("SELECT `Dir` FROM `ftp_users` WHERE `User` = ?");
+        // Query adaptada para ftpd
+        $stmt = $pdo->prepare("SELECT `Dir` FROM `ftpd` WHERE `User` = ?");
         $stmt->execute([$download_user]);
         $dir = $stmt->fetchColumn();
         
@@ -25,12 +25,10 @@ if (isset($_GET['download']) && isset($_GET['user'])) {
             $local_path = get_real_ftp_path($dir);
             $file_path = $local_path . '/' . $download_file;
             
-            // Verifica se o arquivo existe e está realmente dentro do diretório pretendido (prevenção de traversal extra)
             $real_file_path = realpath($file_path);
             $real_local_path = realpath($local_path);
             
             if ($real_file_path && $real_local_path && strpos($real_file_path, $real_local_path) === 0 && file_exists($real_file_path)) {
-                // Configura cabeçalhos de download
                 header('Content-Description: File Transfer');
                 header('Content-Type: application/octet-stream');
                 header('Content-Disposition: attachment; filename="' . basename($real_file_path) . '"');
@@ -39,7 +37,6 @@ if (isset($_GET['download']) && isset($_GET['user'])) {
                 header('Pragma: public');
                 header('Content-Length: ' . filesize($real_file_path));
                 
-                // Limpa buffers e envia o arquivo
                 ob_clean();
                 flush();
                 readfile($real_file_path);
@@ -47,7 +44,7 @@ if (isset($_GET['download']) && isset($_GET['user'])) {
             }
         }
     } catch (PDOException $e) {
-        // Silencia e falha graciosamente
+        // Silencia
     }
     
     header('HTTP/1.0 404 Not Found');
@@ -68,7 +65,8 @@ if (isset($_GET['delete_file']) && isset($_GET['user'])) {
     $delete_file = basename($_GET['delete_file']);
     
     try {
-        $stmt = $pdo->prepare("SELECT `Dir` FROM `ftp_users` WHERE `User` = ?");
+        // Query adaptada para ftpd
+        $stmt = $pdo->prepare("SELECT `Dir` FROM `ftpd` WHERE `User` = ?");
         $stmt->execute([$delete_user]);
         $dir = $stmt->fetchColumn();
         
@@ -106,7 +104,8 @@ $filter_user = isset($_GET['user']) && $_GET['user'] !== '' ? trim($_GET['user']
 // Carrega listas para os filtros
 try {
     $devices = $pdo->query("SELECT id, name FROM devices ORDER BY name ASC")->fetchAll();
-    $ftp_users_list = $pdo->query("SELECT User, device_id FROM ftp_users ORDER BY User ASC")->fetchAll();
+    // Query adaptada para ftpd
+    $ftp_users_list = $pdo->query("SELECT User, device_id FROM ftpd ORDER BY User ASC")->fetchAll();
 } catch (PDOException $e) {
     $devices = [];
     $ftp_users_list = [];
@@ -117,19 +116,18 @@ $scans = [];
 
 try {
     if ($filter_user) {
-        // Escanear apenas um usuário específico
-        $stmt = $pdo->prepare("SELECT f.User, f.Dir, d.name as device_name FROM ftp_users f LEFT JOIN devices d ON f.device_id = d.id WHERE f.User = ?");
+        // Query adaptada para ftpd
+        $stmt = $pdo->prepare("SELECT f.User, f.Dir, d.name as device_name FROM ftpd f LEFT JOIN devices d ON f.device_id = d.id WHERE f.User = ?");
         $stmt->execute([$filter_user]);
-        $res = $stmt->fetchAll();
-        $scans = $res ? $res : [];
+        $scans = $stmt->fetchAll();
     } elseif ($filter_device) {
-        // Escanear todos os usuários associados a um dispositivo
-        $stmt = $pdo->prepare("SELECT f.User, f.Dir, d.name as device_name FROM ftp_users f INNER JOIN devices d ON f.device_id = d.id WHERE f.device_id = ?");
+        // Query adaptada para ftpd
+        $stmt = $pdo->prepare("SELECT f.User, f.Dir, d.name as device_name FROM ftpd f INNER JOIN devices d ON f.device_id = d.id WHERE f.device_id = ?");
         $stmt->execute([$filter_device]);
         $scans = $stmt->fetchAll();
     } else {
-        // Escanear todos os usuários cadastrados
-        $scans = $pdo->query("SELECT f.User, f.Dir, d.name as device_name FROM ftp_users f LEFT JOIN devices d ON f.device_id = d.id")->fetchAll();
+        // Query adaptada para ftpd
+        $scans = $pdo->query("SELECT f.User, f.Dir, d.name as device_name FROM ftpd f LEFT JOIN devices d ON f.device_id = d.id")->fetchAll();
     }
 } catch (PDOException $e) {
     $error_msg = "Erro ao buscar usuários para escaneamento: " . $e->getMessage();
@@ -268,11 +266,9 @@ function format_size_backups($bytes) {
                             <td class="text-muted"><?php echo date('d/m/Y H:i:s', $file['mtime']); ?></td>
                             <td style="text-align: right;">
                                 <div style="display: inline-flex; gap: 0.5rem;">
-                                    <!-- Baixar Backup -->
                                     <a href="backups.php?download=<?php echo urlencode($file['name']); ?>&user=<?php echo urlencode($file['user']); ?>" class="btn btn-sm btn-primary" title="Baixar Backup">
                                         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                                     </a>
-                                    <!-- Excluir Backup -->
                                     <a href="backups.php?delete_file=<?php echo urlencode($file['name']); ?>&user=<?php echo urlencode($file['user']); ?><?php echo $filter_device ? '&device_id=' . $filter_device : ''; ?><?php echo $filter_user ? '&user=' . urlencode($filter_user) : ''; ?>" class="btn btn-sm btn-danger confirm-action" data-confirm-message="Deseja realmente excluir permanentemente o arquivo de backup '<?php echo addslashes($file['name']); ?>'?" title="Excluir Backup">
                                         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                                     </a>
@@ -285,7 +281,6 @@ function format_size_backups($bytes) {
                         <td colspan="6" class="text-center empty-state" style="text-align: center;">
                             <svg viewBox="0 0 24 24" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
                             <p>Nenhum backup encontrado para os critérios de busca.</p>
-                            <p style="font-size: 0.85rem; margin-top: 0.25rem;">Certifique-se de que os equipamentos enviaram arquivos via FTP para as pastas correspondentes.</p>
                         </td>
                     </tr>
                 <?php endif; ?>
