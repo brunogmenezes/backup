@@ -79,7 +79,7 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
 try {
     $sql = "SELECT d.*, GROUP_CONCAT(f.User SEPARATOR ', ') AS ftp_users_list, COUNT(f.User) as ftp_count
             FROM devices d
-            LEFT JOIN ftp_users f ON d.id = f.device_id
+            LEFT JOIN ftpd f ON d.id = f.device_id
             GROUP BY d.id
             ORDER BY d.name ASC";
     $devices = $pdo->query($sql)->fetchAll();
