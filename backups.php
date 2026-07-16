@@ -162,6 +162,23 @@ usort($backup_files, function($a, $b) {
     return $b['mtime'] - $a['mtime'];
 });
 
+// PAGINAÇÃO DE RESULTADOS
+$limit = 15; // Número de backups por página
+$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$total_files = count($backup_files);
+$total_pages = ceil($total_files / $limit);
+if ($total_pages < 1) $total_pages = 1;
+if ($page > $total_pages) $page = $total_pages;
+$offset = ($page - 1) * $limit;
+$paginated_files = array_slice($backup_files, $offset, $limit);
+
+// Função para preservar filtros nos links de página
+function build_page_link($page_num) {
+    $params = $_GET;
+    $params['page'] = $page_num;
+    return 'backups.php?' . http_build_query($params);
+}
+
 // Helper de formatação de tamanho
 function format_size_backups($bytes) {
     $units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -245,8 +262,8 @@ function format_size_backups($bytes) {
                 </tr>
             </thead>
             <tbody>
-                <?php if (count($backup_files) > 0): ?>
-                    <?php foreach ($backup_files as $file): ?>
+                <?php if (count($paginated_files) > 0): ?>
+                    <?php foreach ($paginated_files as $file): ?>
                         <tr>
                             <td style="font-weight: 500; color: white;">
                                 <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -287,6 +304,54 @@ function format_size_backups($bytes) {
             </tbody>
         </table>
     </div>
+
+    <!-- Controles de Paginação -->
+    <?php if ($total_files > 0): ?>
+        <div class="pagination-container">
+            <div class="pagination-info">
+                Exibindo <b><?php echo min($total_files, $offset + 1); ?></b> a <b><?php echo min($total_files, $offset + $limit); ?></b> de <b><?php echo $total_files; ?></b> backups.
+            </div>
+            
+            <?php if ($total_pages > 1): ?>
+                <nav class="pagination-nav">
+                    <!-- Botão Anterior -->
+                    <a href="<?php echo build_page_link($page - 1); ?>" class="pagination-link <?php echo $page <= 1 ? 'disabled' : ''; ?>" title="Página Anterior">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    </a>
+                    
+                    <!-- Páginas -->
+                    <?php
+                    $start_page = max(1, $page - 2);
+                    $end_page = min($total_pages, $page + 2);
+                    
+                    if ($start_page > 1) {
+                        echo '<a href="' . build_page_link(1) . '" class="pagination-link">1</a>';
+                        if ($start_page > 2) {
+                            echo '<span style="color: var(--text-muted); padding: 0 0.25rem;">...</span>';
+                        }
+                    }
+                    
+                    for ($p = $start_page; $p <= $end_page; $p++) {
+                        $active_class = $p === $page ? 'active' : '';
+                        echo '<a href="' . build_page_link($p) . '" class="pagination-link ' . $active_class . '">' . $p . '</a>';
+                    }
+                    
+                    if ($end_page < $total_pages) {
+                        if ($end_page < $total_pages - 1) {
+                            echo '<span style="color: var(--text-muted); padding: 0 0.25rem;">...</span>';
+                        }
+                        echo '<a href="' . build_page_link($total_pages) . '" class="pagination-link">' . $total_pages . '</a>';
+                    }
+                    ?>
+                    
+                    <!-- Botão Próximo -->
+                    <a href="<?php echo build_page_link($page + 1); ?>" class="pagination-link <?php echo $page >= $total_pages ? 'disabled' : ''; ?>" title="Próxima Página">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    </a>
+                </nav>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
 </div>
 
 <?php require_once __DIR__ . '/footer.php'; ?>
