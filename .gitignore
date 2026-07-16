@@ -1,0 +1,9 @@
+# Ignorar pastas de armazenamento de backup de teste
+storage/
+.setup_lock
+.setup_lock*
+
+# Logs e arquivos temporários do sistema/Wamp
+*.log
+.DS_Store
+Thumbs.db
